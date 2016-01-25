@@ -17,6 +17,19 @@ uniform float activators[NUM_SCALES];
 uniform float inhibitors[NUM_SCALES];
 uniform float variations[NUM_SCALES];
 
+const float SCALES_0_ACT_RADIUS = 100.;
+const float SCALES_0_INH_RADIUS = 200.;
+const float SCALES_0_EFT = 0.05;
+const float SCALES_0_WGT = 1.;
+const float SCALES_1_ACT_RADIUS = 10.;
+const float SCALES_1_INH_RADIUS = 20.;
+const float SCALES_1_EFT = 0.03;
+const float SCALES_1_WGT = 1.;
+const float SCALES_2_ACT_RADIUS = 1.;
+const float SCALES_2_INH_RADIUS = 2.;
+const float SCALES_2_EFT = 0.01;
+const float SCALES_2_WGT = 1.;
+
 vec2 wrap(vec2 point)
 {
 	if(point.x > resolution.x)
@@ -67,6 +80,7 @@ float averageValues(vec2 point, float radius)
 	int samples = 0;
 	float average = 0.0;
 	//todo: replace with kernel. for now we just loop
+  if(radius == )
 	for(int x = point.x + radius; x >= point.x - radius; x--)
 	{
 		for(int y = point.y + radius; y >= point.y - radius; y--)
@@ -94,12 +108,19 @@ void solve (vec2 position)
 {
 	float val = texture2D(backbuffer, position)[0];
 	//starting on scales
-	for (var i = NUM_SCALES - 1; i >= 0; i--) {
-		//calculating averages for scale
-		activators[i] = averageValues(position, scales[i][ACT_RADIUS]) * scales[i][WGT];
-		inhibitors[i] = averageValues(position, scales[i][INH_RADIUS]) * scales[i][WGT];
-		variations[i] = abs(activators[i]-inhibitors[i]); //not averaging here
-	};
+	//for (var i = NUM_SCALES - 1; i >= 0; i--) { //unrolled loop
+	//calculating averages for scale
+	activators[0] = averageValues(position, SCALES_0_ACT_RADIUS) * SCALES_0_WGT;
+	inhibitors[0] = averageValues(position, SCALES_0_INH_RADIUS) * SCALES_0_WGT;
+	variations[0] = abs(activators[0]-inhibitors[0]); //not averaging here
+
+  activators[1] = averageValues(position, SCALES_1_ACT_RADIUS) * SCALES_1_WGT;
+  inhibitors[1] = averageValues(position, SCALES_1_INH_RADIUS) * SCALES_1_WGT;
+  variations[1] = abs(activators[1]-inhibitors[1]); //not averaging here
+
+  activators[2] = averageValues(position, SCALES_2_ACT_RADIUS) * SCALES_2_WGT;
+  inhibitors[2] = averageValues(position, SCALES_2_INH_RADIUS) * SCALES_2_WGT;
+  variations[2] = abs(activators[2]-inhibitors[2]); //not averaging here
 
 	//selecting best scale for point
 	int bestscale = getBestScale(variations);
@@ -112,19 +133,6 @@ void solve (vec2 position)
 }
 
 void main( void ) {
- 	scales[0][ACT_RADIUS] = 100;
- 	scales[0][INH_RADIUS] = 200;
- 	scales[0][EFT] = 0.05;
- 	scales[0][WGT] = 1;
- 	scales[1][ACT_RADIUS] = 10;
- 	scales[1][INH_RADIUS] = 20;
- 	scales[1][EFT] = 0.03;
- 	scales[1][WGT] = 1;
- 	scales[2][ACT_RADIUS] = 1;
- 	scales[2][INH_RADIUS] = 2;
- 	scales[2][EFT] = 0.01;
- 	scales[2][WGT] = 1;
-
 	vec2 position = ( gl_FragCoord.xy / resolution.xy );
  	//if first pass
  	//gl_FragColor = noise();
