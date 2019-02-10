@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Procedural Turing patterns as a shader</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0">
+    <style>
+      body {
+        margin: 0px;
+        background-color: #000;
+        overflow: hidden;
+        font-family:Monospace;
+        font-size:13px;
+        margin: 0px;
+        text-align:center;
+        overflow: hidden;
+      }
+
+      #info {
+        color: #fff;
+        position: absolute;
+        top: 10px;
+        width: 100%;
+        text-align: center;
+        display:block;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="info">
+      Turing Patterns
+    </div>
+
+    <script id="procedural-vert" type="x-shader/x-vertex">
+      varying vec2 vUv;
+
+      void main() {
+        vUv = uv;
+        gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+      }
+    </script>
+    <script id="noiseRandom1D-frag" type="x-shader/x-fragment">
+    #include <common>
+    #include <packing>
+
+      varying vec2 vUv;
+
+      void main() {
+        gl_FragColor.xyz = vec3( rand( vUv ) );
+        gl_FragColor.w = 1.0;
+      }
+    </script>
+    <script id="turing-frag" type="x-shader/x-fragment">
+    #include <common>
+    #include <packing>
+
+      varying vec2 vUv;
+      uniform float screenWidth;
+      uniform float screenHeight;
+      uniform sampler2D frameTexture;
+      uniform float time;
+      float sx;
+      float sy;
+      
+      float clampS(float val) {
+        // return val;
+        return val >= 0.5 ? 1.0 : 0.0;
+      }
+
+      vec2 wrap(vec2 coords) {
+        vec2 res;
+        res = vec2(coords);
+        if(res.x < 0.0) {
+          res.x += 1.0;
+        } else if(res.x > 1.0) {
+          res.x -= 1.0;
+        }
+        if(res.y < 0.0) {
+          res.y += 1.0;
+        } else if(res.y > 1.0) {
+          res.y -= 1.0;
+        }
+        return res;
+      }
+      
+      float newValue(vec4 n, vec4 ne, vec4 e, vec4 se, vec4 s, vec4 sw, vec4 w, vec4 nw, vec4 cell) {
+        vec4 sum;
+        sum = n
+          + s
+          + e
+          + w
+          + ne
+          + nw
+          + se
+          + sw;
+        // return sum[0] / 8.0;
+        float score;
+        score = sum.r;
+        if(clampS(cell.r) == 1.0) { // alive
+          if(score < 2.0 || score > 3.0) {
+            return 0.0;
+          } else {
+            return 1.0;
+          }
+        } else { //dead
+        if(score == 3.0 ) {
+            return 1.0;
+          } else {
+            return 0.0;
+          }
+        }
+      }
+
+      void main() {
+        sx = 1.0/(screenWidth + 500.0);
+        sy = 1.0/screenHeight;
+        if(time <= 0.06) {
+          gl_FragColor.xyz = vec3( clampS(rand( vUv )) );
+          gl_FragColor.w = 1.0;
+        } else {
+            gl_FragColor = vec4(
+              newValue(
+                texture2D( frameTexture, wrap(vUv + vec2(0.0, -sy)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(sx, -sy)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(sx, 0.0)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(sx, sy)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(0.0, sy)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(-sx, sy)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(-sx, 0.0)) ),
+                texture2D( frameTexture, wrap(vUv + vec2(-sx, -sy)) ),
+                texture2D( frameTexture, vUv )
+                )
+            );
+        }
+      }
+    </script>
+    
+    <div id="container"></div>
+
+    <script src="lib/three.js"></script>
+    <script src="lib/stats.min.js"></script>
+    <script src="lib/dat.gui.min.js"></script>
+
+    <script>
+
+      var camera, postCamera, postScene, bufferScene, renderer, postMaterial, postQuad, bufferTexture, mainBoxObject, currentBuffer=0;
+      var gui, stats, texture;
+
+      var params = { procedure: "turing-frag" };
+
+      init();
+      animate();
+      initGui();
+
+      // Init gui
+      function initGui() {
+
+        var gui = new dat.GUI();
+        gui.add( params, 'procedure', [ 'turing', 'noiseRandom2D', 'noiseRandom3D' ] );
+
+      }
+
+      function init() {
+
+        container = document.getElementById( "container" );
+
+        renderer = new THREE.WebGLRenderer( { antialias: false } );
+        renderer.setPixelRatio( window.devicePixelRatio );
+        renderer.setSize( window.innerWidth, window.innerHeight );
+        renderer.autoClear = false;
+        document.body.appendChild( renderer.domElement );
+
+        stats = new Stats();
+        container.appendChild( stats.dom );
+
+        camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
+        // postCamera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 1000 );
+
+        // RTT texture
+        bufferTextures = [
+          new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter }),
+          new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter })
+          ];
+
+        var uniforms = { 
+            time: {value: 0.0}, 
+            frameTexture: { value: bufferTextures[currentBuffer].texture },  
+            screenWidth: { value: window.innerWidth }, 
+            screenHeight: { value: window.innerHeight }
+          };
+          console.log(uniforms)
+
+        turingFragMaterial = new THREE.ShaderMaterial({
+          vertexShader: document.querySelector('#procedural-vert').textContent.trim(),
+          fragmentShader: document.querySelector('#turing-frag').textContent.trim(),
+          uniforms: uniforms
+        });
+
+        console.log()
+        
+        // Buffer scene
+        var bufferPlane = new THREE.PlaneGeometry(2, 2);
+        bufferQuad = new THREE.Mesh(bufferPlane, turingFragMaterial);
+        bufferScene = new THREE.Scene();
+        bufferScene.add(bufferQuad);
+
+        // To-screen scene
+        var postMaterial = new THREE.MeshBasicMaterial({map:bufferTextures[currentBuffer].texture});
+        var postPlane = new THREE.PlaneGeometry(2, 2);
+        postQuad = new THREE.Mesh(postPlane, postMaterial);
+        postScene = new THREE.Scene();
+        postScene.add(postQuad);
+
+        window.addEventListener( 'resize', onWindowResize, false );
+
+      }
+
+      function onWindowResize() {
+
+        var width = window.innerWidth;
+        var height = window.innerHeight;
+
+        camera.aspect = width / height;
+        camera.updateProjectionMatrix();
+
+        renderer.setSize( width, height );
+
+      }
+
+      function animate() {
+
+        requestAnimationFrame( animate );
+
+        //renderer.clear()
+
+        turingFragMaterial.uniforms.frameTexture.value = bufferTextures[currentBuffer].texture;
+
+        // switchem buffer so we're not writing to the same buffer we're reading from
+        currentBuffer = currentBuffer === 0 ? 1 : 0;
+
+        // render to texture first so we have the texture uniform updated
+        renderer.render( bufferScene, camera, bufferTextures[currentBuffer], true );
+        
+        postQuad.material.map = bufferTextures[currentBuffer].texture;
+        // render to screen
+        renderer.render( postScene, camera );
+
+        turingFragMaterial.uniforms.time.value += 1.0 / 60.0;
+
+        stats.update();
+
+      }
+
+    </script>
+  </body>
+</html>
