@@ -70,9 +70,7 @@ void getAverage(float[] items, int length)
 
 void getNewValue(float activator, float inhibitor, float effect, float val)
 {
-	return activator > inhibitor
-		?	val + effect
-		:	val - effect;
+	return activator > inhibitor ?	val + effect :	val - effect;
 }
 
 float averageValues(vec2 point, float radius)

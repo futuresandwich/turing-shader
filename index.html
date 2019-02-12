@@ -50,88 +50,16 @@
         gl_FragColor.w = 1.0;
       }
     </script>
-    <script id="turing-frag" type="x-shader/x-fragment">
+    <script id="random-noise-frag" type="x-shader/x-fragment">
     #include <common>
     #include <packing>
-
-      varying vec2 vUv;
-      uniform float screenWidth;
-      uniform float screenHeight;
-      uniform sampler2D frameTexture;
-      uniform float time;
-      float sx;
-      float sy;
-      
       float clampS(float val) {
-        // return val;
         return val >= 0.5 ? 1.0 : 0.0;
       }
-
-      vec2 wrap(vec2 coords) {
-        vec2 res;
-        res = vec2(coords);
-        if(res.x < 0.0) {
-          res.x += 1.0;
-        } else if(res.x > 1.0) {
-          res.x -= 1.0;
-        }
-        if(res.y < 0.0) {
-          res.y += 1.0;
-        } else if(res.y > 1.0) {
-          res.y -= 1.0;
-        }
-        return res;
-      }
-      
-      float newValue(vec4 n, vec4 ne, vec4 e, vec4 se, vec4 s, vec4 sw, vec4 w, vec4 nw, vec4 cell) {
-        vec4 sum;
-        sum = n
-          + s
-          + e
-          + w
-          + ne
-          + nw
-          + se
-          + sw;
-        // return sum[0] / 8.0;
-        float score;
-        score = sum.r;
-        if(clampS(cell.r) == 1.0) { // alive
-          if(score < 2.0 || score > 3.0) {
-            return 0.0;
-          } else {
-            return 1.0;
-          }
-        } else { //dead
-        if(score == 3.0 ) {
-            return 1.0;
-          } else {
-            return 0.0;
-          }
-        }
-      }
-
+      varying vec2 vUv;
       void main() {
-        sx = 1.0/(screenWidth + 500.0);
-        sy = 1.0/screenHeight;
-        if(time <= 0.06) {
-          gl_FragColor.xyz = vec3( clampS(rand( vUv )) );
-          gl_FragColor.w = 1.0;
-        } else {
-            gl_FragColor = vec4(
-              newValue(
-                texture2D( frameTexture, wrap(vUv + vec2(0.0, -sy)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(sx, -sy)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(sx, 0.0)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(sx, sy)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(0.0, sy)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(-sx, sy)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(-sx, 0.0)) ),
-                texture2D( frameTexture, wrap(vUv + vec2(-sx, -sy)) ),
-                texture2D( frameTexture, vUv )
-                )
-            );
-        }
+        gl_FragColor.xyz = vec3( clampS(rand( vUv )) );
+        gl_FragColor.w = 1.0;
       }
     </script>
     
@@ -143,24 +71,46 @@
 
     <script>
 
-      var camera, postCamera, postScene, bufferScene, renderer, postMaterial, postQuad, bufferTexture, mainBoxObject, currentBuffer=0;
-      var gui, stats, texture;
+      var camera, postCamera, postScene, renderer, postMaterial, postQuad, scaleTargets, scaleScenes, variationTargets, variationScene, finalTargets, finalScene, outputTarget, currentBuffer = 0
+      var stats, texture;
 
       var params = { procedure: "turing-frag" };
 
-      init();
-      animate();
-      initGui();
+      loadShadersAndInit();
+
+      function getShader(filename, cb) {
+        var xhr = new XMLHttpRequest();
+        xhr.addEventListener("load", function(data) {
+            cb(data.target.response);
+        });
+        xhr.open("GET",filename);
+        xhr.send();
+      }
 
       // Init gui
       function initGui() {
 
-        var gui = new dat.GUI();
-        gui.add( params, 'procedure', [ 'turing', 'noiseRandom2D', 'noiseRandom3D' ] );
+        // var gui = new dat.GUI();
+        // gui.add( params, 'procedure', [ 'turing', 'noiseRandom2D', 'noiseRandom3D' ] );
 
       }
 
-      function init() {
+      //todo - add promises ;_;
+      function loadShadersAndInit() {
+        getShader('turing1.glsl', function(shader1) {
+          getShader('turing2.glsl', function(shader2) {
+            getShader('turing3.glsl', function(shader3) {
+              getShader('turing-variation.glsl', function(shaderVariation) {
+                getShader('turing-final.glsl', function(shaderFinal) {
+                  init([shader1, shader2, shader3],shaderVariation,shaderFinal)
+                })
+              })
+            })
+          })
+        })
+      }
+
+      function init(shaders,shaderVariation,shaderFinal) {
 
         container = document.getElementById( "container" );
 
@@ -176,43 +126,105 @@
         camera = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
         // postCamera = new THREE.PerspectiveCamera( 70, window.innerWidth / window.innerHeight, 1, 1000 );
 
-        // RTT texture
-        bufferTextures = [
-          new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter }),
-          new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter })
-          ];
+        var targetProps = { minFilter: THREE.LinearFilter, magFilter: THREE.NearestFilter, format: THREE.RGBAFormat }
+        // Render Targets
+        // One scale and variation target for each scale
+        scaleTargets = shaders.map(function(scale) {
+          return new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, targetProps)
+        })
+        variationTargets = shaders.map(function(scale) {
+          return new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, targetProps)
+        })
 
-        var uniforms = { 
-            time: {value: 0.0}, 
-            frameTexture: { value: bufferTextures[currentBuffer].texture },  
+        // Two final targets, to swap between so input != output
+        finalTargets = [
+          new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, targetProps),
+          new THREE.WebGLRenderTarget( window.innerWidth, window.innerHeight, targetProps)
+        ]
+
+        // Shader materials!
+        // Loop goes
+        // Final texture ->* Scale (act/inh) shaders *->* Scale textures
+        // Scale texture *-> Variation shader -> Variation texture
+        // Variation texture -> Final shader -> Final texture...
+        
+        randomNoiseMaterial = new THREE.ShaderMaterial({
+          vertexShader: document.querySelector('#procedural-vert').textContent.trim(),
+          fragmentShader: document.querySelector('#random-noise-frag').textContent.trim(),
+          uniforms: {
             screenWidth: { value: window.innerWidth }, 
             screenHeight: { value: window.innerHeight }
-          };
-          console.log(uniforms)
-
-        turingFragMaterial = new THREE.ShaderMaterial({
-          vertexShader: document.querySelector('#procedural-vert').textContent.trim(),
-          fragmentShader: document.querySelector('#turing-frag').textContent.trim(),
-          uniforms: uniforms
+          }
         });
-
-        console.log()
         
+        scaleMaterials = shaders.map(function(scale) {
+          return new THREE.ShaderMaterial({
+            vertexShader: document.querySelector('#procedural-vert').textContent.trim(),
+            fragmentShader: scale.trim(),
+            uniforms: { 
+              frameTexture: { value: finalTargets[currentBuffer].texture },  
+              screenWidth: { value: window.innerWidth }, 
+              screenHeight: { value: window.innerHeight }
+            }
+          })
+        })
+
+        variationMaterial = new THREE.ShaderMaterial({
+            vertexShader: document.querySelector('#procedural-vert').textContent.trim(),
+            fragmentShader: shaderVariation.trim(),
+            uniforms: { 
+              frameTexture: { value: null },  
+              screenWidth: { value: window.innerWidth }, 
+              screenHeight: { value: window.innerHeight }
+            }
+          })
+        
+        finalMaterial = new THREE.ShaderMaterial({
+          vertexShader: document.querySelector('#procedural-vert').textContent.trim(),
+          fragmentShader: shaderFinal.trim(),
+          uniforms: { 
+              scaleTextures: { type: "tv", value: variationTargets.map(function(vt) { return vt.texture }) },  
+              frameTexture: { value: finalTargets[currentBuffer].texture },
+              screenWidth: { value: window.innerWidth }, 
+              screenHeight: { value: window.innerHeight }
+          }
+        })
+
+        // Set up scenes
         // Buffer scene
-        var bufferPlane = new THREE.PlaneGeometry(2, 2);
-        bufferQuad = new THREE.Mesh(bufferPlane, turingFragMaterial);
-        bufferScene = new THREE.Scene();
-        bufferScene.add(bufferQuad);
+        var plane = new THREE.PlaneGeometry(2, 2);
+
+        scaleScenes = scaleMaterials.map(function(scaleMaterial) {
+          var scaleScene = new THREE.Scene()
+          var scaleQuad = new THREE.Mesh(plane, scaleMaterial)
+          scaleScene.add(scaleQuad)
+          return scaleScene
+        })
+
+        variationScene = new THREE.Scene()
+        variationQuad = new THREE.Mesh(plane, variationMaterial)
+        variationScene.add(variationQuad)
+
+        finalScene = new THREE.Scene()
+        
+        // Pre load the final texture with noise
+        noiseQuad = new THREE.Mesh(plane, randomNoiseMaterial)
+        finalScene.add(noiseQuad)
+        renderer.render( finalScene, camera, finalTargets[currentBuffer], true )
+        finalScene.remove(noiseQuad)
+
+        finalQuad = new THREE.Mesh(plane, finalMaterial)
+        finalScene.add(finalQuad)
 
         // To-screen scene
-        var postMaterial = new THREE.MeshBasicMaterial({map:bufferTextures[currentBuffer].texture});
-        var postPlane = new THREE.PlaneGeometry(2, 2);
-        postQuad = new THREE.Mesh(postPlane, postMaterial);
+        postMaterial = new THREE.MeshBasicMaterial({map:finalTargets[currentBuffer].texture});
+        postQuad = new THREE.Mesh(plane, postMaterial);
         postScene = new THREE.Scene();
         postScene.add(postQuad);
 
         window.addEventListener( 'resize', onWindowResize, false );
-
+        animate();
+        initGui();
       }
 
       function onWindowResize() {
@@ -233,22 +245,32 @@
 
         //renderer.clear()
 
-        turingFragMaterial.uniforms.frameTexture.value = bufferTextures[currentBuffer].texture;
-
-        // switchem buffer so we're not writing to the same buffer we're reading from
-        currentBuffer = currentBuffer === 0 ? 1 : 0;
-
-        // render to texture first so we have the texture uniform updated
-        renderer.render( bufferScene, camera, bufferTextures[currentBuffer], true );
+        for(var i = 0; i < scaleScenes.length; i++) {
+          // render activators and inhibitors
+          renderer.render( scaleScenes[i], camera, scaleTargets[i], true )
+          
+          // render variations
+          variationMaterial.uniforms.frameTexture.value = scaleTargets[i].texture
+          renderer.render( variationScene, camera, variationTargets[i], true )
+        }
         
-        postQuad.material.map = bufferTextures[currentBuffer].texture;
-        // render to screen
+        // swap buffer so the final output gets written to the non-read buffer
+        currentBuffer = currentBuffer == 0 ? 1 : 0
+        
+        //render final new texel values
+        renderer.render( finalScene, camera, finalTargets[currentBuffer], true )
+
+        // now we gotta update all the material source textures
+        for(var i = 0; i < scaleScenes.length; i++) {
+            scaleMaterials[i].uniforms.frameTexture.value = finalTargets[currentBuffer].texture
+        }
+        finalMaterial.uniforms.frameTexture.value = finalTargets[currentBuffer].texture
+        postMaterial.map = finalTargets[currentBuffer].texture
+
+        // render the whole result to screen
         renderer.render( postScene, camera );
 
-        turingFragMaterial.uniforms.time.value += 1.0 / 60.0;
-
         stats.update();
-
       }
 
     </script>
